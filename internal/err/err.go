@@ -2,10 +2,14 @@ package err
 
 import (
 	"log"
-	"os"
+	"runtime"
 )
 
-func Handler(err error){
-	log.Println(err)
-	os.Exit(1)
+func Handler(err error) {
+	_, file, line, ok := runtime.Caller(1)
+	if ok {
+		log.Fatalf("ERROR [%s: %d]:%v \n", file, line, err)
+	} else {
+		log.Fatalln(err)
+	}
 }
