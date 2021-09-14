@@ -22,6 +22,8 @@ bird continue url
 // 查看当前执行的下载任务
 bird task
 ```
+
+
 # 特性
 - 下载进度条显示
 - 支持并发下载
