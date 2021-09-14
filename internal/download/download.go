@@ -3,8 +3,10 @@ package download
 import (
 	"bird/internal/err"
 	"bird/internal/state"
+	"bird/internal/tool"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -13,28 +15,28 @@ import (
 )
 
 type HttpDownloader struct {
-	url           string
+	Url           string
 	Conc          int
-	path          string
-	downloadSlice []*downloadSlice
-	resumeable    bool
-	clen          int
+	Path          string
+	DownloadSlice []*downloadSlice
+	Resumeable    bool
+	Clen          int
 	Interrupte    bool
 }
 
 type downloadSlice struct {
-	url     string
-	path    string
-	fromIdx int
-	toIdx   int
-	num     int
+	Url     string
+	Path    string
+	FromIdx int
+	ToIdx   int
+	Num     int
 }
 
 var (
 	client = http.Client{}
 )
 
-func NewHttpDownloader(url string, conc int, path string) *HttpDownloader {
+func NewHttpDownloader(url string, conc int) *HttpDownloader {
 	resume := true
 	// 发送head包，根据Accept-Ranges获得server是否支持并发下载
 	resp, e := http.Head(url)
@@ -46,61 +48,66 @@ func NewHttpDownloader(url string, conc int, path string) *HttpDownloader {
 		conc = 1
 		resume = false
 	}
+	log.Printf("concurency num: %v \n", conc)
 	// 获取body长度
 	len := resp.Header.Get("Content-Length")
+	log.Printf("total size: %v \n", len)
 	vlen, e := strconv.Atoi(len)
 	if e != nil {
 		err.Handler(e)
 	}
+	slices := []*downloadSlice{}
 
-	slices := make([]*downloadSlice, conc)
+	path := tool.GetCacheFolder(url)
+	log.Printf("cache folder: %v \n", path)
 
 	for i := 0; i < conc; i++ {
 		rg := vlen / conc
 		fromidx := i * rg
 		toidx := (i+1)*rg - 1
-		if toidx > vlen {
+		if i == conc-1 {
 			toidx = vlen
 		}
 		ds := &downloadSlice{
-			url:     url,
-			path:    filepath.Join(path, fmt.Sprintf("path %v", i)),
-			fromIdx: fromidx,
-			toIdx:   toidx,
-			num:     i,
+			Url:     url,
+			Path:    filepath.Join(path, fmt.Sprintf("%v_%v", filepath.Base(url), i)),
+			FromIdx: fromidx,
+			ToIdx:   toidx,
+			Num:     i,
 		}
 		slices = append(slices, ds)
 	}
 	dl := &HttpDownloader{
-		url:           url,
+		Url:           url,
 		Conc:          conc,
-		path:          path,
-		downloadSlice: slices,
-		resumeable:    resume,
-		clen:          vlen,
+		Path:          path,
+		DownloadSlice: slices,
+		Resumeable:    resume,
+		Clen:          vlen,
 		Interrupte:    false,
 	}
 	return dl
 
 }
 
-func RecoverDownloader(state *state.State) *HttpDownloader {
+// func RecoverDownloader(state *state.State) *HttpDownloader {
 
-}
+// }
 
-func (downloader *HttpDownloader) Download(errChan chan error, interruptChan chan bool, stateChan chan *state.State, downChan chan bool) {
+func (downloader *HttpDownloader) Download(errChan chan error, interruptChan chan bool, stateChan chan *state.State, downChan chan bool, fileChan chan string) {
 	wg := sync.WaitGroup{}
 	for i := 0; i < downloader.Conc; i++ {
 		wg.Add(1)
 		go func(slice *downloadSlice, downloader *HttpDownloader) {
+			log.Printf("download: %v \n", slice)
 			defer wg.Done()
-			req, e := http.NewRequest(http.MethodGet, slice.url, nil)
+			req, e := http.NewRequest(http.MethodGet, slice.Url, nil)
 			if e != nil {
 				errChan <- e
 				return
 			}
 			if downloader.Conc > 1 {
-				req.Header.Add("Range", fmt.Sprintf("bytes=%d-%d", slice.fromIdx, slice.toIdx))
+				req.Header.Add("Range", fmt.Sprintf("bytes=%d-%d", slice.FromIdx, slice.ToIdx))
 			}
 			resp, e := client.Do(req)
 			if e != nil {
@@ -110,12 +117,12 @@ func (downloader *HttpDownloader) Download(errChan chan error, interruptChan cha
 			// io.ReadCloser
 			defer resp.Body.Close()
 			// 将内存中的数据拷贝到目标文件中。需要写 & 操作权限。遵循最少权限原则。
-			file, e := os.OpenFile(slice.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
-			defer file.Close()
+			file, e := os.OpenFile(slice.Path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 			if e != nil {
 				errChan <- e
 				return
 			}
+			defer file.Close()
 			// 每次拷贝100bytes
 			offset := 0
 
@@ -124,19 +131,20 @@ func (downloader *HttpDownloader) Download(errChan chan error, interruptChan cha
 				// 被中断，保存状态
 				case <-interruptChan:
 					st := &state.State{
-						Url:     downloader.url,
-						FromIdx: slice.fromIdx,
+						Url:     downloader.Url,
+						FromIdx: slice.FromIdx,
 						Offset:  offset,
-						Path:    slice.path,
+						Path:    slice.Path,
 					}
 					stateChan <- st
-					break
-
+					return
 				default:
 					n, e := io.CopyN(file, resp.Body, 100)
 					if e != nil {
 						if e == io.EOF {
-							break
+							// fileChan <- slice.path
+							log.Printf("download success : %v", slice.Path)
+							return
 						}
 						errChan <- e
 						return
@@ -146,7 +154,7 @@ func (downloader *HttpDownloader) Download(errChan chan error, interruptChan cha
 
 			}
 
-		}(downloader.downloadSlice[i], downloader)
+		}(downloader.DownloadSlice[i], downloader)
 	}
 	wg.Wait()
 	downChan <- true

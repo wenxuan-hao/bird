@@ -1,14 +1,12 @@
 package cmd
 
 import (
-	"bird/internal/err"
 	"bird/internal/task"
-	"bird/internal/tool"
 	"errors"
-	"github.com/spf13/cobra"
 	"log"
-	"os"
 	"runtime"
+
+	"github.com/spf13/cobra"
 )
 
 var downloadCmd = &cobra.Command{
@@ -20,28 +18,20 @@ var downloadCmd = &cobra.Command{
 	Args: func(cmd *cobra.Command, args []string) error {
 		return errors.New("wrong with download args, should only have one url")
 	},
-
 }
 
 var cNum int
 
-func init(){
+func init() {
 	rootCmd.AddCommand(downloadCmd)
 	downloadCmd.Flags().IntVarP(&cNum, "concurrency", "c", runtime.NumCPU(), "set the concurrency num")
 }
 
-func download(args []string){
+func download(args []string) {
 	// get url
 	url := args[0]
 	log.Printf("Strat downloading : %v \n", url)
-	path := tool.GetFolder(url)
-	if tool.IsDirExit(path){
-		os.RemoveAll(path)
-	}
-	e := os.MkdirAll(path, os.ModeDir)
-	if e != nil{
-		err.Handler(e)
-	}
+
 	// task start
-	task.StartDownload(url, path, nil)
+	task.StartDownload(url, cNum, nil)
 }

@@ -1,8 +1,13 @@
 package main
 
-import "os"
+import (
+	"bird/internal/task"
+	"runtime"
+)
 
 func main() {
 	//cmd.Execute()
-	os.RemoveAll("/Users/haowenxuan/code/go/bird/test")
+	src := "https://lf1-ttcdn-tos.pstatp.com/obj/mubu-assets/client/Mubu-3.6.0.dmg"
+	task.StartDownload(src, runtime.NumCPU(), nil)
+
 }

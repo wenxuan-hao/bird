@@ -6,3 +6,7 @@ type State struct {
 	Offset  int
 	Path    string
 }
+
+func Save(states []*State) {
+
+}
